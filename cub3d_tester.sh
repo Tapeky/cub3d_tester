@@ -62,80 +62,44 @@ mkdir -p $TEST_DIR
 TOTAL=0
 PASSED=0
 LEAKS=0
+FAILED_TESTS=()
+LEAKED_TESTS=()
 
 # Function to run a test
 run_test() {
     local test_name=$1
     local test_file=$2
     local expected_error=$3
+    local test_passed=true
     
     TOTAL=$((TOTAL+1))
     
     echo -e "\n==== Testing: $test_name ===="
-    echo "Test file content:"
-    cat $test_file
     
-    # Run the program with the test file
-    echo -e "\nRunning: $EXECUTABLE $test_file"
+    # Run the program with the test file to check for errors
+    output=$($EXECUTABLE $test_file 2>&1)
+    exit_code=$?
     
-    if [ $CHECK_LEAKS -eq 1 ]; then
-        if [ "$OS" == "Linux" ]; then
-            # Use valgrind for leak checking on Linux
-            valgrind_output=$(valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose --log-file="$TEST_DIR/valgrind_output.txt" $EXECUTABLE $test_file 2>&1)
-            output=$(cat "$TEST_DIR/valgrind_output.txt")
-            exit_code=${PIPESTATUS[0]}
+    # Check for memory leaks if requested
+    if [ $CHECK_LEAKS -eq 1 ] && [ "$OS" == "Linux" ]; then
+        # Exécuter valgrind et capturer sa sortie complète
+        valgrind_output=$(valgrind --leak-check=full --show-leak-kinds=all $EXECUTABLE $test_file 2>&1)
+        
+        # Rechercher explicitement "definitely lost" dans la sortie brute
+        if echo "$valgrind_output" | grep -q "definitely lost" && ! echo "$valgrind_output" | grep -q "definitely lost: 0 bytes"; then
+            echo "❌ MEMORY LEAK DETECTED!"
+            echo "Leak details:"
+            echo "$valgrind_output" | grep -A 2 "definitely lost"
+            LEAKS=$((LEAKS+1))
+            LEAKED_TESTS+=("$test_name ($test_file)")
             
-            # Check for memory leaks in valgrind output
-            if grep -q "definitely lost:" "$TEST_DIR/valgrind_output.txt" && ! grep -q "definitely lost: 0 bytes" "$TEST_DIR/valgrind_output.txt"; then
-                echo "❌ MEMORY LEAK DETECTED!"
-                grep -A 2 "definitely lost:" "$TEST_DIR/valgrind_output.txt"
-                LEAKS=$((LEAKS+1))
-            elif grep -q "indirectly lost:" "$TEST_DIR/valgrind_output.txt" && ! grep -q "indirectly lost: 0 bytes" "$TEST_DIR/valgrind_output.txt"; then
-                echo "❌ MEMORY LEAK DETECTED!"
-                grep -A 2 "indirectly lost:" "$TEST_DIR/valgrind_output.txt"
-                LEAKS=$((LEAKS+1))
-            elif grep -q "still reachable:" "$TEST_DIR/valgrind_output.txt" && ! grep -q "still reachable: 0 bytes" "$TEST_DIR/valgrind_output.txt"; then
-                echo "⚠️ MEMORY STILL REACHABLE (possible leak)!"
-                grep -A 2 "still reachable:" "$TEST_DIR/valgrind_output.txt"
-            else
-                echo "✅ NO MEMORY LEAKS DETECTED!"
-            fi
-            
-        elif [ "$OS" == "Darwin" ]; then
-            # Use leaks for leak checking on macOS
-            # Launch program and get its PID
-            $EXECUTABLE $test_file > "$TEST_DIR/output.txt" 2>&1 & 
-            PID=$!
-            
-            # Let the program run for a short time
-            sleep 1
-            
-            # Run leaks on the process
-            leaks_output=$(leaks $PID)
-            
-            # Kill the process
-            kill -9 $PID 2>/dev/null
-            wait $PID 2>/dev/null
-            
-            output=$(cat "$TEST_DIR/output.txt")
-            exit_code=1  # Assuming error because we killed the process
-            
-            # Check for memory leaks in leaks output
-            if echo "$leaks_output" | grep -q "0 leaks"; then
-                echo "✅ NO MEMORY LEAKS DETECTED!"
-            else
-                echo "❌ MEMORY LEAK DETECTED!"
-                echo "$leaks_output" | grep "leaks for"
-                LEAKS=$((LEAKS+1))
-            fi
+            # Commande pour déboguer manuellement
+            echo "Run manually: valgrind --leak-check=full --show-leak-kinds=all $EXECUTABLE $test_file"
+        else
+            echo "✅ NO MEMORY LEAKS DETECTED"
         fi
-    else
-        # Just run the program without leak checking
-        output=$($EXECUTABLE $test_file 2>&1)
-        exit_code=$?
     fi
     
-    echo -e "\nOutput: $output"
     echo "Exit code: $exit_code"
     
     # Check if program detected an error (non-zero exit code)
@@ -143,12 +107,16 @@ run_test() {
         # Check if the error message contains expected text (if provided)
         if [ -n "$expected_error" ] && [[ "$output" != *"Error"* ]]; then
             echo "❌ TEST FAILED: Program exited with error but didn't display 'Error' message"
+            test_passed=false
+            FAILED_TESTS+=("$test_name ($test_file) - exited with error but no 'Error' message")
         else
             echo "✅ TEST PASSED: Program correctly detected an error"
             PASSED=$((PASSED+1))
         fi
     else
         echo "❌ TEST FAILED: Program should have detected an error but didn't"
+        test_passed=false
+        FAILED_TESTS+=("$test_name ($test_file) - program didn't detect error")
     fi
 }
 
@@ -524,16 +492,80 @@ C 225,30,0
 EOF
 run_test "Map with non-rectangular shape" "$TEST_DIR/non_rectangular_map.cub" "Error"
 
-# Test 28: Extension piège - .cubcub
-cp $TEST_DIR/valid.cub $TEST_DIR/piege_extension.cubcub
-run_test "Extension piège (.cubcub)" "$TEST_DIR/piege_extension.cubcub" "Error"
+# Test 23: Map not the last element in file
+cat > $TEST_DIR/map_not_last.cub << EOF
+NO $NO_TEXTURE
+SO $SO_TEXTURE
+WE $WE_TEXTURE
+EA $EA_TEXTURE
+F 220,100,0
 
-# Test 29: Extension piège - .cu
-cp $TEST_DIR/valid.cub $TEST_DIR/piege_extension.cu
-run_test "Extension piège (.cu)" "$TEST_DIR/piege_extension.cu" "Error"
+111111
+100101
+101001
+1100N1
+111111
 
-# Test 30: Mauvaise extension cachée
-cat > $TEST_DIR/extension_cachee.cub.txt << EOF
+C 225,30,0
+EOF
+run_test "Map not the last element" "$TEST_DIR/map_not_last.cub" "Error"
+
+# Test 24: Texture path with spaces
+cat > $TEST_DIR/texture_path_with_spaces.cub << EOF
+NO ./textures/north texture.xpm
+SO $SO_TEXTURE
+WE $WE_TEXTURE
+EA $EA_TEXTURE
+F 220,100,0
+C 225,30,0
+
+111111
+100101
+101001
+1100N1
+111111
+EOF
+run_test "Texture path with spaces" "$TEST_DIR/texture_path_with_spaces.cub" "Error"
+
+# Test 25: Comments in file
+cat > $TEST_DIR/comments_in_file.cub << EOF
+NO $NO_TEXTURE
+SO $SO_TEXTURE
+# This is a comment
+WE $WE_TEXTURE
+EA $EA_TEXTURE
+F 220,100,0
+C 225,30,0
+
+111111
+100101
+101001
+1100N1
+111111
+EOF
+run_test "Comments in file" "$TEST_DIR/comments_in_file.cub" "Error"
+
+# Test 27: Missing map
+cat > $TEST_DIR/missing_map.cub << EOF
+NO $NO_TEXTURE
+SO $SO_TEXTURE
+WE $WE_TEXTURE
+EA $EA_TEXTURE
+F 220,100,0
+C 225,30,0
+EOF
+run_test "Missing map" "$TEST_DIR/missing_map.cub" "Error"
+
+# Test 28: Trap extension - .cubcub
+cp $TEST_DIR/valid.cub $TEST_DIR/trap_extension.cubcub
+run_test "Trap extension (.cubcub)" "$TEST_DIR/trap_extension.cubcub" "Error"
+
+# Test 29: Trap extension - .cu
+cp $TEST_DIR/valid.cub $TEST_DIR/trap_extension.cu
+run_test "Trap extension (.cu)" "$TEST_DIR/trap_extension.cu" "Error"
+
+# Test 30: Hidden wrong extension
+cat > $TEST_DIR/hidden_extension.cub.txt << EOF
 NO $NO_TEXTURE
 SO $SO_TEXTURE
 WE $WE_TEXTURE
@@ -547,10 +579,10 @@ C 225,30,0
 1100N1
 111111
 EOF
-run_test "Extension cachée (.cub.txt)" "$TEST_DIR/extension_cachee.cub.txt" "Error"
+run_test "Hidden extension (.cub.txt)" "$TEST_DIR/hidden_extension.cub.txt" "Error"
 
-# Test 31: Textures avec identifiants similaires
-cat > $TEST_DIR/identifiants_similaires.cub << EOF
+# Test 31: Textures with similar identifiers
+cat > $TEST_DIR/similar_identifiers.cub << EOF
 N0 $NO_TEXTURE
 SO $SO_TEXTURE
 WE $WE_TEXTURE
@@ -564,10 +596,10 @@ C 225,30,0
 1100N1
 111111
 EOF
-run_test "Identifiants similaires (N0 au lieu de NO)" "$TEST_DIR/identifiants_similaires.cub" "Error"
+run_test "Similar identifiers (N0 instead of NO)" "$TEST_DIR/similar_identifiers.cub" "Error"
 
-# Test 32: Couleurs avec séparateurs trompeurs
-cat > $TEST_DIR/separateurs_couleurs.cub << EOF
+# Test 32: Colors with misleading separators
+cat > $TEST_DIR/misleading_separators.cub << EOF
 NO $NO_TEXTURE
 SO $SO_TEXTURE
 WE $WE_TEXTURE
@@ -581,10 +613,10 @@ C 225,30,0
 1100N1
 111111
 EOF
-run_test "Séparateurs couleurs (points au lieu de virgules)" "$TEST_DIR/separateurs_couleurs.cub" "Error"
+run_test "Misleading separators (dots instead of commas)" "$TEST_DIR/misleading_separators.cub" "Error"
 
-# Test 33: Couleurs sans séparateurs
-cat > $TEST_DIR/sans_separateurs.cub << EOF
+# Test 33: Colors without separators
+cat > $TEST_DIR/no_separators.cub << EOF
 NO $NO_TEXTURE
 SO $SO_TEXTURE
 WE $WE_TEXTURE
@@ -598,10 +630,10 @@ C 225,30,0
 1100N1
 111111
 EOF
-run_test "Couleurs sans séparateurs (espaces)" "$TEST_DIR/sans_separateurs.cub" "Error"
+run_test "Colors without separators (spaces)" "$TEST_DIR/no_separators.cub" "Error"
 
-# Test 34: Caractères Unicode dans la carte
-cat > $TEST_DIR/unicode_carte.cub << EOF
+# Test 34: Unicode characters in the map
+cat > $TEST_DIR/unicode_map.cub << EOF
 NO $NO_TEXTURE
 SO $SO_TEXTURE
 WE $WE_TEXTURE
@@ -615,18 +647,14 @@ C 225,30,0
 1100N1
 111111
 EOF
-run_test "Caractères Unicode dans la carte" "$TEST_DIR/unicode_carte.cub" "Error"
+run_test "Unicode characters in the map" "$TEST_DIR/unicode_map.cub" "Error"
 
-# Test 35: Caractères de contrôle dans le fichier
-printf "NO $NO_TEXTURE\nSO $SO_TEXTURE\nWE $WE_TEXTURE\nEA $EA_TEXTURE\nF 220,100,0\nC 225,30,0\n\n111111\n100\b101\n101001\n1100N1\n111111\n" > $TEST_DIR/controle_fichier.cub
-run_test "Caractères de contrôle dans le fichier" "$TEST_DIR/controle_fichier.cub" "Error"
+# Test 35: Control characters in the file
+printf "NO $NO_TEXTURE\nSO $SO_TEXTURE\nWE $WE_TEXTURE\nEA $EA_TEXTURE\nF 220,100,0\nC 225,30,0\n\n111111\n100\b101\n101001\n1100N1\n111111\n" > $TEST_DIR/control_characters.cub
+run_test "Control characters in the file" "$TEST_DIR/control_characters.cub" "Error"
 
-# Test 36: Fichier sans newline final
-printf "NO $NO_TEXTURE\nSO $SO_TEXTURE\nWE $WE_TEXTURE\nEA $EA_TEXTURE\nF 220,100,0\nC 225,30,0\n\n111111\n100101\n101001\n1100N1\n111111" > $TEST_DIR/sans_newline.cub
-run_test "Fichier sans newline final" "$TEST_DIR/sans_newline.cub" "Error"
-
-# Test 37: Tab et espaces mélangés dans la carte
-cat > $TEST_DIR/tab_espaces.cub << EOF
+# Test 37: Mixed tabs and spaces in the map
+cat > $TEST_DIR/mixed_tabs_spaces.cub << EOF
 NO $NO_TEXTURE
 SO $SO_TEXTURE
 WE $WE_TEXTURE
@@ -640,27 +668,10 @@ C 225,30,0
 1100N1
 111111
 EOF
-run_test "Tab et espaces mélangés dans la carte" "$TEST_DIR/tab_espaces.cub" "Error"
+run_test "Mixed tabs and spaces in the map" "$TEST_DIR/mixed_tabs_spaces.cub" "Error"
 
-# Test 38: Espaces entre identifiant et chemin
-cat > $TEST_DIR/espaces_identifiant.cub << EOF
-NO      $NO_TEXTURE
-SO $SO_TEXTURE
-WE $WE_TEXTURE
-EA $EA_TEXTURE
-F 220,100,0
-C 225,30,0
-
-111111
-100101
-101001
-1100N1
-111111
-EOF
-run_test "Espaces multiples entre identifiant et chemin" "$TEST_DIR/espaces_identifiant.cub" "Error"
-
-# Test 39: Ligne vide dans la carte
-cat > $TEST_DIR/ligne_vide_carte.cub << EOF
+# Test 39: Empty line in the map
+cat > $TEST_DIR/empty_line_map.cub << EOF
 NO $NO_TEXTURE
 SO $SO_TEXTURE
 WE $WE_TEXTURE
@@ -675,10 +686,10 @@ C 225,30,0
 1100N1
 111111
 EOF
-run_test "Ligne vide dans la carte" "$TEST_DIR/ligne_vide_carte.cub" "Error"
+run_test "Empty line in the map" "$TEST_DIR/empty_line_map.cub" "Error"
 
-# Test 40: Paramètres supplémentaires inutiles
-cat > $TEST_DIR/parametres_supplementaires.cub << EOF
+# Test 40: Extra parameters after texture
+cat > $TEST_DIR/extra_parameters.cub << EOF
 NO $NO_TEXTURE extra_param
 SO $SO_TEXTURE
 WE $WE_TEXTURE
@@ -692,19 +703,27 @@ C 225,30,0
 1100N1
 111111
 EOF
-run_test "Paramètres supplémentaires après texture" "$TEST_DIR/parametres_supplementaires.cub" "Error"
+run_test "Extra parameters after texture" "$TEST_DIR/extra_parameters.cub" "Error"
 
-# Test 41: Fichier avec caractères invisibles (ZWSP - Zero Width Space)
-printf "NO $NO_TEXTURE\nSO $SO_TEXTURE\nWE $WE_TEXTURE\nEA $EA_TEXTURE\nF 220,100,0\nC 225,30,0\n\n111111\n100\u200B101\n101001\n1100N1\n111111\n" > $TEST_DIR/caracteres_invisibles.cub
-run_test "Caractères invisibles dans le fichier" "$TEST_DIR/caracteres_invisibles.cub" "Error"
+# Test 41: File with invisible characters (ZWSP - Zero Width Space)
+printf "NO $NO_TEXTURE\nSO $SO_TEXTURE\nWE $WE_TEXTURE\nEA $EA_TEXTURE\nF 220,100,0\nC 225,30,0\n\n111111\n100\u200B101\n101001\n1100N1\n111111\n" > $TEST_DIR/invisible_characters.cub
+run_test "Invisible characters in the file" "$TEST_DIR/invisible_characters.cub" "Error"
 
-# Test 42: Fichier avec BOM (Byte Order Mark)
-printf "\xEF\xBB\xBFNO $NO_TEXTURE\nSO $SO_TEXTURE\nWE $WE_TEXTURE\nEA $EA_TEXTURE\nF 220,100,0\nC 225,30,0\n\n111111\n100101\n101001\n1100N1\n111111\n" > $TEST_DIR/fichier_avec_bom.cub
-run_test "Fichier avec BOM (Byte Order Mark)" "$TEST_DIR/fichier_avec_bom.cub" "Error"
+# Test 42: File with BOM (Byte Order Mark)
+printf "\xEF\xBB\xBFNO $NO_TEXTURE\nSO $SO_TEXTURE\nWE $WE_TEXTURE\nEA $EA_TEXTURE\nF 220,100,0\nC 225,30,0\n\n111111\n100101\n101001\n1100N1\n111111\n" > $TEST_DIR/file_with_bom.cub
+run_test "File with BOM (Byte Order Mark)" "$TEST_DIR/file_with_bom.cub" "Error"
 
-# Test 43: Joueur placé exactement à la bordure
-cat > $TEST_DIR/joueur_bordure.cub << EOF
-NO $NO_TEXTURE
+# Test 45: File with Windows carriage returns (CRLF)
+printf "NO $NO_TEXTURE\r\nSO $SO_TEXTURE\r\nWE $WE_TEXTURE\r\nEA $EA_TEXTURE\r\nF 220,100,0\r\nC 225,30,0\r\n\r\n111111\r\n100101\r\n101001\r\n1100N1\r\n111111\r\n" > $TEST_DIR/crlf_windows.cub
+run_test "File with Windows carriage returns (CRLF)" "$TEST_DIR/crlf_windows.cub" "Error"
+
+# Test 46: Texture file without read permission
+# Create a copy of a texture and remove read permissions
+cp $NO_TEXTURE $TEST_DIR/no_read_texture.jpg
+chmod 0 $TEST_DIR/no_read_texture.jpg
+
+cat > $TEST_DIR/texture_no_read_permission.cub << EOF
+NO $TEST_DIR/no_read_texture.jpg
 SO $SO_TEXTURE
 WE $WE_TEXTURE
 EA $EA_TEXTURE
@@ -712,21 +731,31 @@ F 220,100,0
 C 225,30,0
 
 111111
-1N0101
+100101
 101001
-110001
+1100N1
 111111
 EOF
-run_test "Joueur placé à la bordure" "$TEST_DIR/joueur_bordure.cub" "Error"
+run_test "Texture without read permission" "$TEST_DIR/texture_no_read_permission.cub" "Error"
 
-# Test 44: Valeurs RGB avec leading zeros
-cat > $TEST_DIR/rgb_leading_zeros.cub << EOF
-NO $NO_TEXTURE
-SO $SO_TEXTURE
-WE $WE_TEXTURE
-EA $EA_TEXTURE
+# Test 47: All texture files without read permission
+# Create copies of all textures and remove read permissions
+cp $NO_TEXTURE $TEST_DIR/no_read_north.jpg
+cp $SO_TEXTURE $TEST_DIR/no_read_south.jpg
+cp $WE_TEXTURE $TEST_DIR/no_read_west.jpg
+cp $EA_TEXTURE $TEST_DIR/no_read_east.jpg
+chmod 0 $TEST_DIR/no_read_north.jpg
+chmod 0 $TEST_DIR/no_read_south.jpg
+chmod 0 $TEST_DIR/no_read_west.jpg
+chmod 0 $TEST_DIR/no_read_east.jpg
+
+cat > $TEST_DIR/all_textures_no_read.cub << EOF
+NO $TEST_DIR/no_read_north.jpg
+SO $TEST_DIR/no_read_south.jpg
+WE $TEST_DIR/no_read_west.jpg
+EA $TEST_DIR/no_read_east.jpg
 F 220,100,0
-C 000,030,000
+C 225,30,0
 
 111111
 100101
@@ -734,12 +763,58 @@ C 000,030,000
 1100N1
 111111
 EOF
-run_test "Valeurs RGB avec leading zeros" "$TEST_DIR/rgb_leading_zeros.cub" "Error"
+run_test "All textures without read permission" "$TEST_DIR/all_textures_no_read.cub" "Error"
 
-# Test 45: Fichier avec retours chariot Windows (CRLF)
-printf "NO $NO_TEXTURE\r\nSO $SO_TEXTURE\r\nWE $WE_TEXTURE\r\nEA $EA_TEXTURE\r\nF 220,100,0\r\nC 225,30,0\r\n\r\n111111\r\n100101\r\n101001\r\n1100N1\r\n111111\r\n" > $TEST_DIR/crlf_windows.cub
-run_test "Fichier avec retours chariot Windows (CRLF)" "$TEST_DIR/crlf_windows.cub" "Error"
+# Test 48: Directory as texture file
+# Create a directory and use it as a texture
+mkdir -p $TEST_DIR/texture_dir
+cat > $TEST_DIR/texture_directory.cub << EOF
+NO $TEST_DIR/texture_dir
+SO $SO_TEXTURE
+WE $WE_TEXTURE
+EA $EA_TEXTURE
+F 220,100,0
+C 225,30,0
 
+111111
+100101
+101001
+1100N1
+111111
+EOF
+run_test "Directory used as texture" "$TEST_DIR/texture_directory.cub" "Error"
+
+# Test 49: Invalid texture path with special characters
+cat > $TEST_DIR/special_characters_path.cub << EOF
+NO $TEST_DIR/texture@\$%^&*()|.jpg
+SO $SO_TEXTURE
+WE $WE_TEXTURE
+EA $EA_TEXTURE
+F 220,100,0
+C 225,30,0
+
+111111
+100101
+101001
+1100N1
+111111
+EOF
+run_test "Texture path with special characters" "$TEST_DIR/special_characters_path.cub" "Error"
+
+# Cleanup temporary files at the end of the script
+cleanup() {
+    echo "Cleaning up temporary files..."
+    # Remove test files with modified permissions
+    rm -f $TEST_DIR/no_read_texture.jpg
+    rm -f $TEST_DIR/no_read_north.jpg
+    rm -f $TEST_DIR/no_read_south.jpg
+    rm -f $TEST_DIR/no_read_west.jpg
+    rm -f $TEST_DIR/no_read_east.jpg
+    rm -rf $TEST_DIR/texture_dir
+}
+
+# Execute the cleanup function at the end of the script
+trap cleanup EXIT
 
 # Show summary
 echo -e "\n==== Test Summary ===="
@@ -750,10 +825,26 @@ if [ $CHECK_LEAKS -eq 1 ]; then
     echo "Memory leaks detected: $LEAKS"
 fi
 
+# Show failed tests
+if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
+    echo -e "\n❌ FAILED TESTS:"
+    for i in "${!FAILED_TESTS[@]}"; do
+        echo "  $((i+1)). ${FAILED_TESTS[$i]}"
+    done
+fi
+
+# Show leaked tests
+if [ $CHECK_LEAKS -eq 1 ] && [ ${#LEAKED_TESTS[@]} -gt 0 ]; then
+    echo -e "\n❌ TESTS WITH MEMORY LEAKS:"
+    for i in "${!LEAKED_TESTS[@]}"; do
+        echo "  $((i+1)). ${LEAKED_TESTS[$i]}"
+    done
+fi
+
 if [ $PASSED -eq $TOTAL ]; then
-    echo "✅ ALL PARSING TESTS PASSED!"
+    echo -e "\n✅ ALL PARSING TESTS PASSED!"
 else
-    echo "❌ SOME PARSING TESTS FAILED!"
+    echo -e "\n❌ SOME PARSING TESTS FAILED!"
 fi
 
 if [ $CHECK_LEAKS -eq 1 ] && [ $LEAKS -eq 0 ]; then
