@@ -17,7 +17,7 @@ chmod +x cub3d_tester.sh
 ```
 
 ---
-##🚀 Usage
+# 🚀 Usage
 Basic usage :
 ```bash
 ./cub3d_tester.sh <executable> <north_texture> <south_texture> <west_texture> <east_texture> [--check-leaks]
@@ -26,7 +26,7 @@ Example
 ```bash
 ./cub3d_tester.sh ./cub3D ./textures/north.xpm ./textures/south.xpm ./textures/west.xpm ./textures/east.xpm --check-leaks
 ```
-##Arguments
+# Arguments
 
 `<executable>` : Path to your Cub3D executable  
 `<north_texture>` : Path to the north texture file  
