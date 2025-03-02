@@ -34,3 +34,28 @@ Example
 `<west_texture>` : Path to the west texture file  
 `<east_texture>` : Path to the east texture file  
 `--check-leaks` : Optional flag to enable memory leak checking  
+
+---
+# 📊 Output Example
+```bash
+==== Testing: Missing texture path ====
+Exit code: 1
+✅ TEST PASSED: Program correctly detected an error
+
+...
+
+==== Test Summary ====
+Total tests: 49
+Passed: 48
+Failed: 1
+Memory leaks detected: 0
+
+❌ FAILED TESTS:
+  1. Invalid texture file (cub3d_test_files/invalid_texture_file.cub) - program didn't detect error
+
+✅ MOST PARSING TESTS PASSED!
+✅ NO MEMORY LEAKS DETECTED!
+...
+
+
+
