@@ -28,9 +28,9 @@ Example
 ```
 Arguments
 
-`<executable>` : Path to your Cub3D executable 
-`<north_texture>` : Path to the north texture file
-`<south_texture>` : Path to the south texture file
-`<west_texture>` : Path to the west texture file
-`<east_texture>` : Path to the east texture file
-`--check-leaks` : Optional flag to enable memory leak checking
+`<executable>` : Path to your Cub3D executable  
+`<north_texture>` : Path to the north texture file  
+`<south_texture>` : Path to the south texture file  
+`<west_texture>` : Path to the west texture file  
+`<east_texture>` : Path to the east texture file  
+`--check-leaks` : Optional flag to enable memory leak checking  
