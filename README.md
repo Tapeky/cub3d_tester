@@ -56,4 +56,14 @@ Memory leaks detected: 0
 ✅ MOST PARSING TESTS PASSED!
 ✅ NO MEMORY LEAKS DETECTED!
 ```
+# 💡 Benefits
+* Save Time: Automate testing instead of creating test cases manually  
+* Find Edge Cases: Discover parsing issues you might not have considered  
+* Ensure Robustness: Make sure your program properly handles all error cases  
+* Memory Management: Verify your program doesn't leak memory  
+---
+# 👨‍💻 Author
+**tsadouk**  
+[✉️ tsadouk@student.42angouleme.fr](mailto:tsadouk@42angouleme.fr)  
+Étudiant à **42** | Angouleme, France
 
