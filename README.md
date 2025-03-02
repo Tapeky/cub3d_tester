@@ -42,6 +42,11 @@ Example
 Exit code: 1
 ✅ TEST PASSED: Program correctly detected an error
 
+==== With: --check-leaks ===
+✅ NO MEMORY LEAKS DETECTED
+Exit code: 1
+✅ TEST PASSED: Program correctly detected an error
+
 ...
 
 ==== Test Summary ====
