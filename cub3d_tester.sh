@@ -852,3 +852,6 @@ if [ $CHECK_LEAKS -eq 1 ] && [ $LEAKS -eq 0 ]; then
 elif [ $CHECK_LEAKS -eq 1 ]; then
     echo "❌ MEMORY LEAKS DETECTED IN $LEAKS TESTS!"
 fi
+
+# Cleanup test directory
+rm -rf $TEST_DIR
