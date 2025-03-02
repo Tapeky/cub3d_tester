@@ -55,7 +55,5 @@ Memory leaks detected: 0
 
 ✅ MOST PARSING TESTS PASSED!
 ✅ NO MEMORY LEAKS DETECTED!
-...
-
-
+```
 
